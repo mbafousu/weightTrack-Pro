@@ -79,3 +79,26 @@ function convertWeight(value, fromUnit, toUnit) {
   if (fromUnit === toUnit) return value;
   return (fromUnit === "lbs" && toUnit === "kg") ? lbsToKg(value) : kgToLbs(value);
 }
+
+// ------ createElement------------------------
+
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "className") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k === "html") node.innerHTML = v;
+    else if (k === "dataset") Object.assign(node.dataset, v);
+    else node.setAttribute(k, v);
+  }
+  //------------------ appendChild---------------
+   
+  children.forEach(ch => node.appendChild(ch));
+  return node;
+}
+
+function showToast(msg, kind = "primary") {
+  const alert = el("div", { className: `alert alert-${kind} py-2 mb-2`, role: "alert", text: msg });
+  toastArea.appendChild(alert);
+  setTimeout(() => alert.remove(), 2200); // BOM setTimeout
+}
