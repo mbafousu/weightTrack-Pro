@@ -319,10 +319,10 @@ function render() {
   app.appendChild(header);
   app.appendChild(main);
 
-    // -----------------------
-  // Rubric: querySelector/querySelectorAll
-  // -----------------------
-  
+    // --------------------------------------------
+  //  querySelector/querySelectorAll
+  // ----------------------------------------------
+
   const clockEl = document.querySelector("#clock");
   const titleEl = document.querySelector("#title");
   setInterval(() => {
@@ -502,7 +502,8 @@ function wireEvents() {
     const row = e.target.closest(".log-row");
     if (!row) return;
 
-    // Rubric: parent/child/sibling traversal
+    // -----------------------parent/child/sibling traversal------------------------
+
     const firstCell = row.firstElementChild;          // date cell
     const weightCell = firstCell.nextElementSibling;  // sibling cell
     void weightCell.textContent; // proof access
@@ -571,3 +572,188 @@ function renderKPIs() {
     { label: "Δ since last", value: delta != null ? `${delta > 0 ? "+" : ""}${delta} ${unitLabel()}` : "—" },
     { label: "Total change", value: totalChange != null ? `${totalChange > 0 ? "+" : ""}${totalChange} ${unitLabel()}` : "—" }
   ];
+  
+  //--------------iterate over collection----------
+  cards.forEach(c => {
+    const col = el("div", { className: "col-6 col-lg-3" }, [
+      el("div", { className: "border rounded-3 p-3 metric-card bg-white" }, [
+        el("div", { className: "label", text: c.label }),
+        el("div", { className: "value", text: c.value })
+      ])
+    ]);
+    kpiArea.appendChild(col);
+  });
+
+  // Optional alert toast
+
+  const alertText = rapidChangeAlert(logsAsc);
+  if (alertText) showToast(alertText, "warning");
+}
+
+function computeProgressPercent(current, goal, start) {
+  const denom = (start - goal);
+  if (denom === 0) return 100;
+  const pct = ((start - current) / denom) * 100;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+function rapidChangeAlert(logsAsc) {
+  if (logsAsc.length < 2) return "";
+  const a = logsAsc[logsAsc.length - 2];
+  const b = logsAsc[logsAsc.length - 1];
+
+  const msA = new Date(a.date + "T00:00:00").getTime();
+  const msB = new Date(b.date + "T00:00:00").getTime();
+  const days = Math.abs(msB - msA) / (1000*60*60*24);
+  const change = round1(b.weight - a.weight);
+
+  if (days <= 1 && Math.abs(change) >= 2) {
+    return `Alert: ${change > 0 ? "+" : ""}${change} ${unitLabel()} in ~24h`;
+  }
+  return "";
+}
+
+function renderTable() {
+  tableBody.innerHTML = "";
+
+  const rangeFiltered = getFilteredLogs();
+  const logsSorted = rangeFiltered.slice().sort((a,b) =>
+    (db.ui.sort === "oldest")
+      ? a.date.localeCompare(b.date)
+      : b.date.localeCompare(a.date)
+  );
+
+  emptyState.style.display = logsSorted.length ? "none" : "block";
+
+  // Build a map for delta vs previous
+  const ascAll = db.logs.slice().sort((a,b) => a.date.localeCompare(b.date));
+  const idx = new Map(ascAll.map((l,i) => [l.id, i]));
+
+  //-------------- DocumentFragment-------------------
+
+  const frag = document.createDocumentFragment();
+
+  logsSorted.forEach(l => {
+    const clone = rowTpl.content.cloneNode(true); // cloneNode
+    const tr = clone.querySelector("tr");
+    tr.dataset.id = l.id; //modify attribute
+
+    clone.querySelector(".c-date").textContent = l.date;
+    clone.querySelector(".c-weight").textContent = String(l.weight);
+
+    const i = idx.get(l.id);
+    let deltaText = "—";
+    if (i > 0) {
+      const prev = ascAll[i - 1].weight;
+      const d = round1(l.weight - prev);
+      deltaText = `${d > 0 ? "+" : ""}${d}`;
+    }
+    clone.querySelector(".c-delta").textContent = deltaText;
+
+    // Flag badge
+    const flagTd = clone.querySelector(".c-flag");
+    const badge = document.createElement("span");
+    badge.className = "badge badge-soft";
+    badge.textContent = "Normal";
+
+    if (deltaText !== "—") {
+      const d = Number(deltaText);
+      if (d >= 2) {
+        badge.className = "badge badge-soft-warning";
+        badge.textContent = "Rapid Gain";
+      } else if (d <= -2) {
+        badge.className = "badge badge-soft-success";
+        badge.textContent = "Good Drop";
+      }
+    }
+    flagTd.appendChild(badge);
+
+    clone.querySelector(".c-notes").textContent = l.notes || "—";
+
+    frag.appendChild(clone);
+  });
+
+  tableBody.appendChild(frag);
+}
+
+function editLog(id) {
+  const entry = db.logs.find(l => l.id === id);
+  if (!entry) return;
+
+  // BOM prompt
+  const newWeightStr = prompt(`Edit weight (${unitLabel()}):`, String(entry.weight));
+  if (newWeightStr === null) return;
+
+  const newWeight = toNum(newWeightStr);
+  if (!Number.isFinite(newWeight) || newWeight <= 0) {
+    alert("Invalid weight.");
+    return;
+  }
+
+  entry.weight = round1(newWeight);
+  saveDB();
+  showToast("Log updated.", "primary");
+  refreshAll();
+}
+
+function deleteLog(id) {
+  const entry = db.logs.find(l => l.id === id);
+  if (!entry) return;
+
+  // BOM confirm
+  if (!confirm(`Delete log on ${entry.date}?`)) return;
+
+  db.logs = db.logs.filter(l => l.id !== id);
+  saveDB();
+  showToast("Log deleted.", "secondary");
+  refreshAll();
+}
+
+function exportCSV() {
+  const logs = db.logs.slice().sort((a,b) => a.date.localeCompare(b.date));
+  if (!logs.length) {
+    showToast("No logs to export.", "secondary");
+    return;
+  }
+
+  const lines = [
+    ["Name", db.profile.name],
+    ["DOB", db.profile.dob],
+    ["Age", calcAge(db.profile.dob)],
+    ["Unit", unitLabel()],
+    ["GoalWeight", db.goalWeight ?? ""],
+    [],
+    ["Date", `Weight (${unitLabel()})`, "Notes"],
+    ...logs.map(l => [l.date, String(l.weight), l.notes || ""])
+  ];
+
+  const csv = lines.map(row => row.map(cell => {
+    const s = String(cell ?? "");
+    return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(",")).join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `WeightTrack-Pro_Personal_${db.profile.name.replaceAll(" ", "_")}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  showToast("CSV exported.", "success");
+}
+
+function clearAll() {
+  if (!confirm("Clear ALL profile, goal, and logs?")) return;
+  localStorage.removeItem(DB_KEY);
+  location.reload(); // BOM location
+}
+
+// -----------------------
+// Start
+// -----------------------
+render();
+
